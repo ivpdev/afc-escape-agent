@@ -13,6 +13,7 @@ file. The keys come from .env.
 
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.error
@@ -43,6 +44,13 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 # competition's managed keys — Agent Fight Club's OpenRouter-compatible proxy,
 # which takes the AFC token as the key and pays with the admin's key.
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
+
+# Certificates are verified as usual, minus one rule Python 3.13 added: strict
+# X.509 checking, which rejects the CA certificates of corporate TLS inspection
+# (Zscaler and the like) for lacking a key usage extension, so every call fails
+# behind them. The chain is still checked against the trusted roots.
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
 
 
 def load_config():
@@ -182,7 +190,7 @@ def call_afc(method, path, body=None):
 
     request = urllib.request.Request(f"{AFC_SERVER_URL}{path}", data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, context=SSL_CONTEXT) as response:
             text = response.read().decode()
     except urllib.error.HTTPError as error:
         # Failures come back as {"message": "..."} — use that, it reads better
@@ -235,7 +243,7 @@ def ask_model(messages, agent_id="main", model=MODEL, tools=TOOLS):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, context=SSL_CONTEXT) as response:
             payload = json.loads(response.read().decode())
     except urllib.error.HTTPError as error:
         raise RuntimeError(f"OpenRouter API error ({error.code}): {error.read().decode()}") from error
